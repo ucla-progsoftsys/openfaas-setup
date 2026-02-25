@@ -11,11 +11,53 @@ Each function instance:
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/) or [k3d](https://k3d.io/)
-- [faas-cli](https://docs.openfaas.com/cli/install/)
-- `jq`, `redis-cli` (on the host running the test script)
+Docker, kubectl, kind, helm, faas-cli, jq, and redis-cli must all be on your PATH.
+
+### Windows (Scoop — run in PowerShell)
+
+```powershell
+# Install Scoop if you don't have it
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+irm get.scoop.sh | iex
+
+# Core tools
+scoop install kind helm jq redis
+
+# faas-cli
+scoop bucket add extras
+scoop install faas-cli
+```
+
+Install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) separately and start it before proceeding. kubectl ships with Docker Desktop; if you need it standalone: `scoop install kubectl`.
+
+### macOS (Homebrew)
+
+```bash
+brew install kind helm jq redis faas-cli
+brew install --cask docker   # Docker Desktop
+```
+
+### Linux
+
+```bash
+# kubectl
+curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+# kind
+curl -Lo kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+chmod +x kind && sudo mv kind /usr/local/bin/
+
+# helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# faas-cli
+curl -sSL https://cli.openfaas.com | sudo sh
+
+# jq and redis-cli
+sudo apt-get install -y jq redis-tools   # Debian/Ubuntu
+# sudo dnf install -y jq redis            # Fedora/RHEL
+```
 
 ---
 
