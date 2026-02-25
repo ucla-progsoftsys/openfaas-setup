@@ -11,7 +11,7 @@ Each function instance:
 
 ## Prerequisites
 
-Docker, kubectl, kind, helm, faas-cli, jq, and redis-cli must all be on your PATH.
+The following tools must be on your PATH: `docker`, `kubectl`, `helm`, `faas-cli`, `jq`, `redis-cli`. On macOS/Linux you also need `kind` (or `k3d`) to create a local cluster. On Windows, Docker Desktop's built-in Kubernetes is used instead (no kind needed).
 
 ### Windows (Scoop — run in PowerShell)
 
@@ -20,15 +20,13 @@ Docker, kubectl, kind, helm, faas-cli, jq, and redis-cli must all be on your PAT
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 irm get.scoop.sh | iex
 
-# Core tools
-scoop install kind helm jq redis
-
-# faas-cli
+# Install tools
+scoop install helm jq redis
 scoop bucket add extras
 scoop install faas-cli
 ```
 
-Install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) separately and start it before proceeding. kubectl ships with Docker Desktop; if you need it standalone: `scoop install kubectl`.
+Install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) separately and start it before proceeding. `kubectl` ships with Docker Desktop; if you need it standalone: `scoop install kubectl`.
 
 ### macOS (Homebrew)
 
@@ -90,6 +88,12 @@ helm upgrade --install openfaas openfaas/openfaas \
   --set generateBasicAuth=true
 ```
 
+Wait for the gateway to be ready before continuing:
+
+```bash
+kubectl rollout status deployment/gateway -n openfaas --timeout=120s
+```
+
 ### 3. Deploy Redis
 
 ```bash
@@ -98,14 +102,19 @@ kubectl apply -f k8s/redis.yaml
 
 ### 4. Deploy the function
 
-`stack.yml` references a pre-built public image (`asundresh/profile-fn:latest`) so you can deploy straight away without building anything:
+Start the gateway port-forward (leave it running in a separate terminal):
 
 ```bash
-# Log in to the OpenFaaS gateway (keep the port-forward from step 2 running)
+kubectl port-forward -n openfaas svc/gateway 8080:8080
+```
+
+Log in and deploy:
+
+```bash
 PASSWORD=$(kubectl -n openfaas get secret basic-auth -o jsonpath='{.data.basic-auth-password}' | base64 --decode)
 echo $PASSWORD | faas-cli login --username admin --password-stdin --gateway http://127.0.0.1:8080
 
-# Deploy — must be run from the repo root
+# Must be run from the repo root
 faas-cli deploy -f stack.yml
 
 # Patch the Deployment to add grace period + POD_UID downward API
@@ -113,72 +122,81 @@ kubectl patch deployment profile-fn -n openfaas-fn \
   --patch-file k8s/function-patch.yaml
 ```
 
-**If you want to modify the function and push your own image:**
+`stack.yml` references a pre-built public image (`asundresh/profile-fn:latest`) so no Docker build is needed to run the demo.
+
+**To modify the function and use your own image:**
 
 ```bash
 docker build -t <your-dockerhub-username>/profile-fn:latest ./fn
 docker push <your-dockerhub-username>/profile-fn:latest
 ```
 
-Then update the `image:` line in `stack.yml` to match and redeploy. OpenFaaS CE only accepts public registry images, so the repository must be public on Docker Hub (or another public registry).
+Then update the `image:` line in `stack.yml` and redeploy. OpenFaaS CE only accepts public registry images, so the repository must be public on Docker Hub (or another public registry).
 
 ---
 
 ## Running the demo
 
-Open two port-forward terminals and leave them running:
+You need two port-forwards running. The gateway one was started in step 4. Start the Redis one in another terminal:
 
 ```bash
-# Terminal 1 — OpenFaaS gateway
-kubectl port-forward -n openfaas svc/gateway 8080:8080
-
-# Terminal 2 — Redis (for test script and manual inspection)
 kubectl port-forward -n openfaas svc/redis 6379:6379
 ```
 
-Run the test loop:
+Then run the test loop from the repo root:
 
 ```bash
-chmod +x scripts/test_loop.sh
-TRIALS=20 ./scripts/test_loop.sh
+# macOS / Linux
+TRIALS=20 bash scripts/test_loop.sh
+
+# Windows Git Bash
+TRIALS=20 bash scripts/test_loop.sh
 ```
 
 The script exits `0` if every trial passes, `1` otherwise.
 
-**Trial 1 note:** Redis has no artifact yet on a fresh cluster. The wrapper logs `ARTIFACT_MISSING`, seeds a default payload (counter=0), and the first push writes counter=1. This is expected — the script detects the pre-existing counter before the loop starts and uses it as the baseline, so trial 1 passes like any other.
+**Trial 1 note:** On a fresh cluster Redis has no artifact yet. The wrapper logs `ARTIFACT_MISSING`, seeds a default payload (counter=0), and the first push writes counter=1. This is expected and the script accounts for it — trial 1 passes like any other.
 
-Expected output per trial:
+Expected output:
 
 ```
-[...] No existing artifact — trial 1 will seed Redis from default (counter=0 → 1)
+[...] PRE-LOOP: cycling pod to ensure trial 1 starts fresh...
+[...] PRE-LOOP: waiting for replacement pod...
+[...] Baseline counter=1 (read after pre-loop)
 
 [...] ══ Trial 1/20 ══════
 [...] Invoking profile-fn...
-[...] pod_uid=abc123  artifact_hash=3f9a1c  runseq=1
+[...] pod_uid=abc123  artifact_hash=3f9a1c  runseq=2
 [...] started key present: {"pod":"abc123","started_ms":...}
 [...] Deleting pod profile-fn-xxxx (grace=20s)...
 [...] Waiting for pod termination...
 [...] terminated key present: {"pod":"abc123","terminated_ms":...}
-[...] artifact counter=1 (expected 1)  last_writer=abc123
+[...] artifact counter=2 (expected 2)  last_writer=abc123
 [...] Trial 1: PASS
+...
+════════════════════════════════════════════════════
+ Results: 20 passed / 0 failed / 20 total
+════════════════════════════════════════════════════
 ```
 
 ---
 
 ## Manual inspection
 
+These require the Redis port-forward to be running (`kubectl port-forward -n openfaas svc/redis 6379:6379`):
+
 ```bash
 # Last written artifact
-redis-cli GET artifact:profile-fn:v1
+redis-cli -h 127.0.0.1 -p 6379 GET artifact:profile-fn:v1
 
 # Per-pod start record
-redis-cli GET started:<podUID>
+redis-cli -h 127.0.0.1 -p 6379 GET started:<podUID>
 
 # Per-pod termination record
-redis-cli GET terminated:<podUID>
+redis-cli -h 127.0.0.1 -p 6379 GET terminated:<podUID>
 
 # Run sequence counter
-redis-cli GET runseq:profile-fn:v1
+redis-cli -h 127.0.0.1 -p 6379 GET runseq:profile-fn:v1
 ```
 
 ---
@@ -193,7 +211,7 @@ redis-cli GET runseq:profile-fn:v1
 | `TERM_HANDLER_START` | `entrypoint.sh` | Wrapper caught SIGTERM, starting push |
 | `POST_PUSH_DONE` | `entrypoint.sh` | Artifact pushed to Redis |
 
-From trial 2 onward, each cold start reads the artifact written by the previous instance. The test script verifies `counter == prev + 1` on every trial — that monotonic increment is the chain-of-custody proof. Trial 1 bootstraps the chain from a default payload, which is expected and not a failure.
+Each cold start reads the artifact written by the previous instance. The test script verifies `counter == prev + 1` on every trial — that monotonic increment is the chain-of-custody proof.
 
 ---
 
