@@ -28,6 +28,13 @@ scoop install faas-cli
 
 Install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) separately and start it before proceeding. `kubectl` ships with Docker Desktop; if you need it standalone: `scoop install kubectl`.
 
+Scoop installs to `%USERPROFILE%\scoop\shims`, which Git Bash doesn't include on PATH by default. Add it once so the tools are available in Git Bash:
+
+```bash
+echo 'export PATH="$PATH:$HOME/scoop/shims"' >> ~/.bashrc
+source ~/.bashrc
+```
+
 ### macOS (Homebrew)
 
 ```bash
@@ -108,18 +115,22 @@ Start the gateway port-forward (leave it running in a separate terminal):
 kubectl port-forward -n openfaas svc/gateway 8080:8080
 ```
 
-Log in and deploy:
+Log in and deploy — run these from the repo root:
 
 ```bash
+cd /path/to/openfaas-setup
+
 PASSWORD=$(kubectl -n openfaas get secret basic-auth -o jsonpath='{.data.basic-auth-password}' | base64 --decode)
 echo $PASSWORD | faas-cli login --username admin --password-stdin --gateway http://127.0.0.1:8080
 
-# Must be run from the repo root
 faas-cli deploy -f stack.yml
 
 # Patch the Deployment to add grace period + POD_UID downward API
 kubectl patch deployment profile-fn -n openfaas-fn \
   --patch-file k8s/function-patch.yaml
+
+# Wait for the patched pod to be ready before running the demo
+kubectl rollout status deployment/profile-fn -n openfaas-fn --timeout=60s
 ```
 
 `stack.yml` references a pre-built public image (`asundresh/profile-fn:latest`) so no Docker build is needed to run the demo.
@@ -146,10 +157,6 @@ kubectl port-forward -n openfaas svc/redis 6379:6379
 Then run the test loop from the repo root:
 
 ```bash
-# macOS / Linux
-TRIALS=20 bash scripts/test_loop.sh
-
-# Windows Git Bash
 TRIALS=20 bash scripts/test_loop.sh
 ```
 
