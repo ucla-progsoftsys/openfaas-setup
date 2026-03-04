@@ -40,8 +40,7 @@ _term() {
   if [ -f "${OUT_PROFILE}" ]; then
     PUSH_PAYLOAD=$(cat "${OUT_PROFILE}")
   else
-    COUNTER=$(printf '%s' "${ARTIFACT}" | jq -r '.counter // 0' 2>/dev/null || echo "0")
-    COUNTER=$((COUNTER + 1))
+    COUNTER=$(rcmd INCR "counter:${FN_NAME}:${FN_VERSION}")
     PUSH_PAYLOAD=$(jq -n \
       --arg  pod "${POD_UID}" \
       --argjson ms  "${NOW_MS}" \
